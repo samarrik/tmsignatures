@@ -1,0 +1,11 @@
+# Data files and directories
+data/
+
+# Model files and checkpoints
+models/
+
+# Log files
+logs/
+
+# Reports and outputs
+reports/
