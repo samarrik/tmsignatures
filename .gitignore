@@ -1,11 +1,37 @@
-# Data files and directories
+# Python environment
+.venv/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data directories
 data/
 
-# Model files and checkpoints
-models/
-
-# Log files
+# Generated content
 logs/
+*.log
 
-# Reports and outputs
+# Media and output files
 reports/
+
+# IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Environment variables
+.env
+.env.*
