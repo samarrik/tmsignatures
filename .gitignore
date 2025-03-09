@@ -15,6 +15,9 @@ data/
 logs/
 *.log
 
+# Models
+models/
+
 # Media and output files
 reports/
 
