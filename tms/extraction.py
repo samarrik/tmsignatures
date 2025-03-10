@@ -12,7 +12,7 @@ from tms.utils.data import TMSDataset
 logger = logging.getLogger(__name__)
 
 
-def extract_features(
+def perform_extraction(
     datasets: List[TMSDataset],
     subdataset_id: int,
     subdatasets_cnt: int,

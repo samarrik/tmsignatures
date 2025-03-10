@@ -3,12 +3,16 @@ import logging
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
+import subprocess
+import time
 
 import ffmpeg
 import torch
 from torch.utils.data import Dataset
+from tqdm import tqdm
 
 from tms.utils.env import get_env
+from tms.utils.facecrop import crop_face_from_video
 
 logger = logging.getLogger(__name__)
 
@@ -296,12 +300,181 @@ class TMSDataset(Dataset):
         self.dataset_extracted_dir.mkdir(parents=True, exist_ok=True)
         self.dataset_correlations_dir.mkdir(parents=True, exist_ok=True)
 
+        # Check if dataset needs preprocessing
+        if not self._is_dataset_processed():
+            logger.info(
+                f"Dataset {dataset_name} not found or incomplete. Starting preprocessing..."
+            )
+            self._preprocess_dataset()
+            logger.info(f"Dataset {dataset_name} preprocessing completed.")
+
         # Load data
         self.samples = self._load_samples()
         logger.info(
             f"Initialized {dataset_name} dataset with {len(self.samples)} samples "
             f"and {len(self.transforms)} available transforms"
         )
+
+    def _preprocess_dataset(self) -> None:
+        """Preprocess the dataset by downloading and cropping videos."""
+        # Create necessary directories
+        train_dir = self.dataset_data_dir / "train"
+        test_dir = self.dataset_data_dir / "test"
+
+        train_dir.mkdir(parents=True, exist_ok=True)
+        test_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load metadata
+        sources_path = self.dataset_dir / "metadata" / "sources.json"
+        if not sources_path.exists():
+            raise FileNotFoundError(f"Sources file not found: {sources_path}")
+
+        with open(sources_path) as f:
+            sources = json.load(f)
+
+        # Process train and test sets
+        for split in ["train", "test"]:
+            split_data = sources[split]
+            split_dir = train_dir if split == "train" else test_dir
+
+            # Process each identity
+            for identity_id, identity_data in tqdm(
+                split_data.items(), desc=f"Processing {split} identities"
+            ):
+                identity_dir = split_dir / identity_id
+                identity_dir.mkdir(exist_ok=True)
+
+                # Process each video
+                for video_id, video_data in tqdm(
+                    identity_data.items(), desc=f"Processing videos for {identity_id}"
+                ):
+                    youtube_id = video_data["id"]
+                    video_dir = identity_dir / youtube_id
+                    video_dir.mkdir(exist_ok=True)
+
+                    clips = video_data["clips"]
+
+                    # Download and process video clips
+                    self._process_video_clips(
+                        youtube_id=youtube_id,
+                        clips=clips,
+                        output_dir=video_dir,
+                    )
+
+    def _process_video_clips(
+        self,
+        youtube_id: str,
+        clips: Dict[str, Dict[str, str]],
+        output_dir: Path,
+    ) -> None:
+        """Process video clips from YouTube video.
+
+        Args:
+            youtube_id: YouTube video ID
+            clips: Dictionary of clip information
+            output_dir: Directory to save processed clips
+        """
+        # First check if all clips already exist
+        all_clips_exist = True
+        missing_clips = []
+        for clip_id in clips.keys():
+            clip_path = output_dir / f"{clip_id}.mp4"
+            if not clip_path.exists():
+                all_clips_exist = False
+                missing_clips.append(clip_id)
+
+        if all_clips_exist:
+            return
+
+        try:
+            # Download video in 480p using yt-dlp with retries
+            temp_video = output_dir / "temp_video.mp4"
+            max_retries = 3
+            retry_delay = 5  # seconds
+            
+            for attempt in range(max_retries):
+                try:
+                    cmd = [
+                        "yt-dlp",
+                        f"https://www.youtube.com/watch?v={youtube_id}",
+                        "-f", "best[height<=480][ext=mp4]",
+                        "-o", str(temp_video),
+                        "--no-playlist",
+                        "--quiet"
+                    ]
+                    subprocess.run(cmd, check=True)
+                    break
+                except subprocess.CalledProcessError as e:
+                    if attempt == max_retries - 1:
+                        logger.error(f"Failed to download video {youtube_id} after {max_retries} attempts: {e}")
+                        return
+                    logger.warning(f"Attempt {attempt + 1} failed, retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+
+            # Process each clip
+            for clip_id, clip_info in clips.items():
+                # Skip if clip already exists
+                clip_path = output_dir / f"{clip_id}.mp4"
+                if clip_path.exists():
+                    continue
+
+                start_time = self._time_to_seconds(clip_info["start"])
+                end_time = self._time_to_seconds(clip_info["finish"])
+
+                # Verify clip length
+                if abs(end_time - start_time - self.clip_length) > 0.1:  # Allow 0.1s tolerance
+                    logger.warning(
+                        f"Clip {clip_id} length mismatch: "
+                        f"expected {self.clip_length}s, got {end_time - start_time}s"
+                    )
+                    continue
+
+                temp_clip = output_dir / f"temp_{clip_id}.mp4"
+
+                try:
+                    # Extract clip with exact timing and fps
+                    (
+                        ffmpeg.input(str(temp_video), ss=start_time, t=self.clip_length)
+                        .output(
+                            str(temp_clip),
+                            vf=f"fps={self.fps}",
+                            acodec="aac",
+                            vcodec="libx264",
+                        )
+                        .overwrite_output()
+                        .run(capture_stdout=True, capture_stderr=True)
+                    )
+
+                    # Apply face cropping
+                    crop_face_from_video(str(temp_clip), str(clip_path))
+
+                    # Clean up temporary clip
+                    temp_clip.unlink()
+
+                except ffmpeg.Error as e:
+                    logger.error(
+                        f"Failed to process clip {clip_id}: {e.stderr.decode() if e.stderr else str(e)}"
+                    )
+                    continue
+
+            # Clean up temporary video
+            temp_video.unlink()
+
+        except Exception as e:
+            logger.error(f"Failed to process video {youtube_id}: {str(e)}")
+
+    @staticmethod
+    def _time_to_seconds(time_str: str) -> float:
+        """Convert time string (MM:SS) to seconds.
+
+        Args:
+            time_str: Time string in format "MM:SS"
+
+        Returns:
+            Time in seconds as float
+        """
+        minutes, seconds = map(float, time_str.split(":"))
+        return minutes * 60 + seconds
 
     def _load_config(self, config_path: Optional[str] = None) -> Dict:
         """Load dataset configuration from JSON file.
@@ -455,6 +628,56 @@ class TMSDataset(Dataset):
                 f"Transform index {idx} is out of range [-1, {len(self.transforms)})"
             )
         self.transform_in_use_idx = idx
+
+    def _is_dataset_processed(self) -> bool:
+        """Check if the dataset has been downloaded and processed.
+
+        Returns:
+            bool: True if dataset is fully processed, False otherwise
+        """
+        # Check if metadata exists
+        sources_path = self.dataset_dir / "metadata" / "sources.json"
+        if not sources_path.exists():
+            logger.warning(
+                f"Dataset {self.dataset_name} doesn't have metadata. Treating as processed."
+            )
+            return True
+
+        try:
+            # Load metadata to check expected files
+            with open(sources_path) as f:
+                sources = json.load(f)
+
+            # Check both train and test splits
+            for split in ["train", "test"]:
+                split_dir = self.dataset_data_dir / split
+                if not split_dir.exists():
+                    return False
+
+                # Check each identity directory
+                for identity_id, identity_data in sources[split].items():
+                    identity_dir = split_dir / identity_id
+                    if not identity_dir.exists():
+                        return False
+
+                    # Check each video directory
+                    for video_id, video_data in identity_data.items():
+                        youtube_id = video_data["id"]
+                        video_dir = identity_dir / youtube_id
+                        if not video_dir.exists():
+                            return False
+
+                        # Check each clip file
+                        for clip_id in video_data["clips"].keys():
+                            clip_path = video_dir / f"{clip_id}.mp4"
+                            if not clip_path.exists():
+                                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error checking dataset status: {str(e)}")
+            return False
 
 
 def initialize_datasets() -> Dict[str, TMSDataset]:

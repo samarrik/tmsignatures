@@ -30,7 +30,7 @@ def create_default_env(env_path: str = ".env") -> None:
     default_env = {
         # Environment
         "ENV": "development",
-        "LOG_LEVEL": "DEBUG",
+        "LOG_LEVEL": "INFO",
         # Paths
         "DATA_DIR": "data",
         "MODELS_DIR": "models",
@@ -41,13 +41,6 @@ def create_default_env(env_path: str = ".env") -> None:
         "TEMP_DIR": "temp",
         "LOG_CFG": "logging_config.json",
         "DATASETS_CFG": "datasets_config.json",
-        # # Transformations
-        # "CRF_VALUES": "28,36,41,51",
-        # "RESCALE_COEFFS": "0.75,0.5,0.25,0.1",
-        # # Features
-        # "FEATURES": "Pitch,Roll,Yaw,AU01,AU02,AU04,AU05,AU06,AU07,AU09,AU10,AU11,AU12,AU14,AU15,AU17,AU20,AU23,AU24,AU25,AU26,AU28,AU43",
-        # # Postprocessing
-        # "CLIP_LENGTHS_COEFFS": "1.0,0.75,0.5,0.25,0.1,0.01",
     }
 
     with open(env_path, "w") as f:

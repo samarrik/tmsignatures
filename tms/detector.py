@@ -31,7 +31,7 @@ from torch.utils.data import DataLoader
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from tqdm import tqdm
 
-from tms.config import MODELS_ROOT
+from tms.utils.env import get_env
 
 
 class Detector(nn.Module, PyTorchModelHubMixin):
@@ -68,7 +68,7 @@ class Detector(nn.Module, PyTorchModelHubMixin):
         facepose_config_file = hf_hub_download(
             repo_id="py-feat/img2pose",
             filename="config.json",
-            cache_dir=MODELS_ROOT,
+            cache_dir=get_env("MODELS_DIR"),
         )
         with open(facepose_config_file, "r") as f:
             facepose_config = json.load(f)
@@ -94,7 +94,7 @@ class Detector(nn.Module, PyTorchModelHubMixin):
         facepose_model_file = hf_hub_download(
             repo_id="py-feat/img2pose",
             filename="model.safetensors",
-            cache_dir=MODELS_ROOT,
+            cache_dir=get_env("MODELS_DIR"),
         )
         facepose_checkpoint = load_file(facepose_model_file)
         self.facepose_detector.load_state_dict(facepose_checkpoint, load_model_weights)
@@ -110,7 +110,7 @@ class Detector(nn.Module, PyTorchModelHubMixin):
         landmark_model_file = hf_hub_download(
             repo_id="py-feat/mobilefacenet",
             filename="mobilefacenet_model_best.pth.tar",
-            cache_dir=MODELS_ROOT,
+            cache_dir=get_env("MODELS_DIR"),
         )
         landmark_state_dict = torch.load(
             landmark_model_file, map_location=self.device, weights_only=True
@@ -124,7 +124,7 @@ class Detector(nn.Module, PyTorchModelHubMixin):
         au_model_path = hf_hub_download(
             repo_id="py-feat/xgb_au",
             filename="xgb_au_classifier.skops",
-            cache_dir=MODELS_ROOT,
+            cache_dir=get_env("MODELS_DIR"),
         )
         au_unknown_types = get_untrusted_types(file=au_model_path)
         loaded_au_model = load(au_model_path, trusted=au_unknown_types)

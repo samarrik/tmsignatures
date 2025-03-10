@@ -5,8 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
+    "facenet-pytorch>=2.5.3",
+    "ffmpeg-python>=0.2.0",
+    "numpy>=1.23.5",
+    "opencv-python>=4.8.1.78",
     "py-feat",
     "python-dotenv>=1.0.1",
+    "pytube>=15.0.0",
+    "torch>=2.6.0",
+    "tqdm>=4.67.1",
 ]
 
 [tool.uv.sources]
