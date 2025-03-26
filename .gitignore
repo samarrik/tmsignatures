@@ -1,7 +1,10 @@
+# SLURM files
+*.slurm
+
 # Old files
 *.old.*
 
-# Data
+# Large files
 /data/
 /models/
 

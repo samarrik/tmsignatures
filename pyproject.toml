@@ -5,11 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "argparse>=1.4.0",
+    "facenet-pytorch>=2.5.3",
     "ffmpeg-python>=0.2.0",
-    "polars>=1.26.0",
-    "rich>=13.9.4",
-    "seaborn>=0.13.2",
+    "gdown>=5.2.0",
+    "opencv-python>=4.8.1.78",
+    "py-feat",
     "torch>=2.6.0",
-    "yt-dlp>=2025.3.26",
+    "tqdm>=4.67.1",
+    "yt-dlp>=2025.2.19",
 ]
+
+[tool.uv.sources]
+py-feat = { git = "https://github.com/cosanlab/py-feat.git" }
