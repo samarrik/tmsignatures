@@ -4,7 +4,7 @@ import os
 import time
 import zipfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import gdown
 import numpy as np
@@ -557,6 +557,41 @@ class TMSDataset(Dataset):
         # Save the computed df_corr for this clip configuration
         # Save without index to avoid 'Unnamed: 0' column in the output
         df_corr.to_csv(output_path, index=False)
+
+
+class FacialFeaturesDataset(Dataset):
+    """
+    Dataset of only the facial features of the videos. Primarily used for training and testing NNs.
+    """
+
+    def __init__(
+        self,
+        general_dataset: TMSDataset,
+    ):
+        self.name = general_dataset.name
+        self.samples = general_dataset.samples_paths
+        self.identity_to_label = {
+            id_: i for i, id_ in enumerate(sorted(set(s[1] for s in self.samples)))
+        }
+        self.features = general_dataset.features
+        self.clip_length = general_dataset.req_clip_length
+        self.fps = general_dataset.req_fps
+
+    def __len__(self) -> int:
+        """
+        Returns the number of samples in the dataset.
+        """
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> Tuple[np.ndarray, int]:
+        """
+        Returns the features and the label for the sample at the given index.
+        """
+        path, identity = self.samples[idx]
+        features = unify_processed_video_file(
+            path, self.features, self.clip_length, self.fps
+        ).values.astype(np.float32)
+        return features, self.identity_to_label[identity]
 
 
 def initialize_datasets(data_dir_path: Path = Path("data/")) -> Dict[str, TMSDataset]:
