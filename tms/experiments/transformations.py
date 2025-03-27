@@ -47,11 +47,7 @@ def visualize_and_save_results(
     # Save raw results as JSON
     path = results_data_dir / f"{name}_results.json"
     with open(path, "w") as f:
-        json.dump(
-            results,
-            f,
-            indent=4,
-        )
+        json.dump(results, f, indent=4)
 
     # Set up plot style using seaborn
     sns.set_theme(style="ticks", context="paper", font_scale=1.2)
@@ -74,7 +70,7 @@ def visualize_and_save_results(
 
     df = pd.DataFrame(plot_data)
 
-    # Create the plot
+    # Create the line plot with consistent styling
     sns.lineplot(
         data=df,
         x="Parameter",
@@ -83,22 +79,32 @@ def visualize_and_save_results(
         style="Model",
         markers=True,
         dashes=False,
+        linewidth=2,
+        marker="o",
+        markersize=6,
+        palette=["#2ecc71", "#e74c3c", "#3498db"],  # Professional color scheme
     )
 
     # Customize the plot
     plt.title(title)
     plt.xlabel(x_label)
     plt.ylabel(y_label)
-    plt.legend(title=legend_title)
+    plt.legend(title=legend_title, bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.grid(True, alpha=0.3)
 
     # Format x-axis for better readability
     if all(isinstance(x, float) for x in x_values):
         plt.xticks(x_values)
 
-    # Save the plot
+    # Use scientific style with no border on top and right
+    sns.despine()
+
+    # Save with publication quality
     plt.tight_layout()
-    plt.savefig(results_figures_dir / f"{name}_plot.png")
+    plt.savefig(
+        results_figures_dir / f"{name}_plot.png",
+        bbox_inches='tight'
+    )
     plt.close()
 
 

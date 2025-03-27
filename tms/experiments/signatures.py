@@ -8,8 +8,10 @@ import seaborn as sns
 import torch
 from sklearn.manifold import TSNE
 from sklearn.metrics import confusion_matrix
+from tqdm import tqdm
 
 from tms.data.datasets import FacialFeaturesDataset, TMSDataset
+from tms.data.utils.video_manipulations import unify_processed_video_file
 from tms.experiments.models.resnet import ArcFaceResNet, ResNet, train_arcface_resnet
 
 
@@ -99,7 +101,7 @@ def signatures_distance(dataset: TMSDataset) -> None:
 
         df = pd.concat([same_class_data, other_class_data], ignore_index=True)
 
-        # Setup the plot
+        # Setup the plot style
         sns.set_theme(style="ticks", context="paper", font_scale=1.2)
         plt.figure(figsize=(8, 5), dpi=150)
 
@@ -122,9 +124,12 @@ def signatures_distance(dataset: TMSDataset) -> None:
         plt.legend(title="")
         plt.grid(True, alpha=0.3)
 
-        # Save the plot
+        # Use scientific style with no border on top and right
+        sns.despine()
+
+        # Save with publication quality
         plt.tight_layout()
-        plt.savefig(figures_dir / f"distance_distribution_class_{target_label}.png")
+        plt.savefig(figures_dir / f"distance_distribution_class_{target_label}.png", bbox_inches='tight')
         plt.close()
 
 
@@ -259,22 +264,25 @@ def contrastive_learning_finetuning(dataset: TMSDataset) -> None:
         x="x",
         y="y",
         hue="Class",
-        palette="rainbow",
+        palette="husl",  # More professional color palette
         s=50,
         alpha=0.7,
-        edgecolor="k",
-        linewidth=0.5,
+        edgecolor="none",
     )
 
     # Customize the plot
     plt.title("t-SNE Visualization of ArcFace Embeddings")
     plt.xlabel("t-SNE Dimension 1")
     plt.ylabel("t-SNE Dimension 2")
-    plt.legend(title="Identity", loc="best")
+    plt.legend(title="Identity", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.grid(True, alpha=0.3)
 
-    # Save the plot
+    # Use scientific style with no border on top and right
+    sns.despine()
+
+    # Save with publication quality
     plt.tight_layout()
-    plt.savefig(figures_dir / "arcface_embeddings_tsne.png")
+    plt.savefig(figures_dir / "arcface_embeddings_tsne.png", bbox_inches='tight')
     plt.close()
 
     # Plot training metrics
@@ -308,6 +316,7 @@ def contrastive_learning_finetuning(dataset: TMSDataset) -> None:
         style="Metric",
         markers=True,
         dashes=False,
+        palette=["#2ecc71", "#e74c3c"],
     )
 
     # Customize the plot
@@ -315,10 +324,14 @@ def contrastive_learning_finetuning(dataset: TMSDataset) -> None:
     plt.xlabel("Epoch")
     plt.ylabel("Accuracy (%)")
     plt.grid(True, alpha=0.3)
+    plt.legend(title="", bbox_to_anchor=(1.05, 1), loc="upper left")
 
-    # Save the plot
+    # Use scientific style with no border on top and right
+    sns.despine()
+
+    # Save with publication quality
     plt.tight_layout()
-    plt.savefig(figures_dir / "arcface_training_accuracy.png")
+    plt.savefig(figures_dir / "arcface_training_accuracy.png", bbox_inches='tight')
     plt.close()
 
     # Create confusion matrix if data is available
@@ -453,7 +466,7 @@ def arcface_signatures_distance(dataset: TMSDataset) -> None:
 
         df = pd.concat([same_class_data, other_class_data], ignore_index=True)
 
-        # Setup the plot
+        # Setup the plot style
         sns.set_theme(style="ticks", context="paper", font_scale=1.2)
         plt.figure(figsize=(8, 5), dpi=150)
 
@@ -476,9 +489,229 @@ def arcface_signatures_distance(dataset: TMSDataset) -> None:
         plt.legend(title="")
         plt.grid(True, alpha=0.3)
 
-        # Save the plot
+        # Use scientific style with no border on top and right
+        sns.despine()
+
+        # Save with publication quality
         plt.tight_layout()
         plt.savefig(
-            figures_dir / f"arcface_distance_distribution_class_{target_label}.png"
+            figures_dir / f"arcface_distance_distribution_class_{target_label}.png",
+            bbox_inches='tight'
+        )
+        plt.close()
+
+
+def deepfake_detection(
+    talking_celebs_dataset: TMSDataset, additional_dataset: TMSDataset
+) -> None:
+    """
+    Analyze embeddings from videos to detect deepfake regions by tracking distance to identity centroid.
+
+    This experiment:
+    1. Calculates Zelenskyi's centroid from TalkingCelebs training data
+    2. Extracts embeddings from 30-second windows (15-second overlap) from Additional dataset videos
+    3. Calculates distances to the centroid for each window
+    4. Plots distances over time, highlighting deepfake regions
+
+    Args:
+        talking_celebs_dataset: The TalkingCelebs dataset containing Zelenskyi's training data
+        additional_dataset: The dataset containing videos to analyze for deepfakes
+    """
+    print("Running deepfake detection experiment...")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Load the ArcFace model
+    model_path = (
+        Path("models")
+        / "experiments"
+        / talking_celebs_dataset.name
+        / "arcface_resnet_best.pth"
+    )
+    if not model_path.exists():
+        print(
+            "ArcFace model not found. Please run contrastive_learning_finetuning first."
+        )
+        return
+
+    checkpoint = torch.load(model_path)
+    model = ArcFaceResNet(num_classes=len(checkpoint["class_mapping"]))
+    model.load_state_dict(checkpoint["state_dict"])
+    model = model.to(device)
+    model.eval()
+
+    # Find all training files for Zelenskyi
+    zelenskyi_id = "id00002"  # ID for Zelenskyi in TalkingCelebs
+    train_processed_path = (
+        talking_celebs_dataset.path
+        / "processed"
+        / "Raw"
+        / "None"
+        / "train"
+        / zelenskyi_id
+    )
+    zelenskyi_files = list(train_processed_path.rglob("*.csv"))
+
+    if not zelenskyi_files:
+        print(f"No training data found for Zelenskyi ({zelenskyi_id})")
+        return
+
+    print(f"Found {len(zelenskyi_files)} training files for Zelenskyi")
+
+    # Extract features and calculate centroid
+    zelenskyi_embeddings = []
+
+    for file_path in tqdm(zelenskyi_files, desc="Extracting Zelenskyi embeddings"):
+        features_df = unify_processed_video_file(
+            file_path,
+            talking_celebs_dataset.features,
+            talking_celebs_dataset.clip_length,
+            talking_celebs_dataset.fps,
+        )
+
+        features = features_df.values.astype(np.float32)
+        features_tensor = torch.tensor(features).to(device)
+
+        with torch.no_grad():
+            embedding = model.extract_embeddings(features_tensor.unsqueeze(0))
+            embedding = embedding.cpu().numpy().flatten()
+            zelenskyi_embeddings.append(embedding)
+
+    zelenskyi_centroid = np.mean(np.stack(zelenskyi_embeddings), axis=0)
+
+    # Create figures directory
+    figures_dir = Path("results") / talking_celebs_dataset.name / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+
+    # Process each video
+    video_info = [
+        {
+            "name": "fs_injected.mp4",
+            "deepfake_start": 72,  # 1:12 in seconds
+            "deepfake_end": 144,  # 2:24 in seconds
+            "title": "FaceSwap Injected Video",
+        },
+        {
+            "name": "ls_injected.mp4",
+            "deepfake_start": 72,  # 1:12 in seconds
+            "deepfake_end": 144,  # 2:24 in seconds
+            "title": "LipSync Injected Video",
+        },
+        {
+            "name": "long.mp4",
+            "deepfake_start": None,
+            "deepfake_end": None,
+            "title": "Pristine Video (No Manipulation)",
+        },
+    ]
+
+    # Window parameters
+    window_size = 30  # seconds
+    window_overlap = 15  # seconds
+
+    for video in video_info:
+        print(f"Processing {video['name']}...")
+
+        processed_file = (
+            additional_dataset.path
+            / "processed"
+            / "Raw"
+            / "None"
+            / video["name"].replace(".mp4", ".csv")
+        )
+        if not processed_file.exists():
+            print(f"Processed file not found: {processed_file}")
+            continue
+
+        full_features = pd.read_csv(processed_file)
+        full_features = full_features[talking_celebs_dataset.features]
+
+        # Calculate windows
+        frames_per_window = int(window_size * talking_celebs_dataset.fps)
+        frames_step = int((window_size - window_overlap) * talking_celebs_dataset.fps)
+        num_frames = len(full_features)
+        window_starts = list(range(0, num_frames - frames_per_window + 1, frames_step))
+
+        # Process each window
+        window_times = []
+        distances = []
+
+        for start_idx in window_starts:
+            end_idx = start_idx + frames_per_window
+            window_features = full_features.iloc[start_idx:end_idx].values.astype(
+                np.float32
+            )
+            window_center = (
+                start_idx + frames_per_window / 2
+            ) / talking_celebs_dataset.fps
+
+            features_tensor = torch.tensor(window_features).to(device)
+
+            with torch.no_grad():
+                embedding = model.extract_embeddings(features_tensor.unsqueeze(0))
+                embedding = embedding.cpu().numpy().flatten()
+                distance = np.linalg.norm(embedding - zelenskyi_centroid)
+
+            window_times.append(window_center)
+            distances.append(distance)
+
+        # Create plot with consistent style
+        sns.set_theme(style="ticks", context="paper", font_scale=1.2)
+        plt.figure(figsize=(8, 5), dpi=150)
+
+        plot_df = pd.DataFrame({"Time": window_times, "Distance": distances})
+
+        # Create line plot with consistent styling
+        sns.lineplot(
+            data=plot_df,
+            x="Time",
+            y="Distance",
+            markers=True,
+            dashes=False,
+            color="#2ecc71",
+            linewidth=2,
+            marker="o",
+            markersize=6,
+        )
+
+        plt.ylim(0, 2)
+
+        if video["deepfake_start"] is not None:
+            plt.axvspan(
+                video["deepfake_start"],
+                video["deepfake_end"],
+                alpha=0.3,
+                color="#e74c3c",
+                label="Deepfake Region",
+            )
+
+            plt.axvline(x=video["deepfake_start"], color="#e74c3c", linestyle="-", alpha=0.7, linewidth=1.5)
+            plt.axvline(x=video["deepfake_end"], color="#e74c3c", linestyle="-", alpha=0.7, linewidth=1.5)
+
+            mid_point = (video["deepfake_start"] + video["deepfake_end"]) / 2
+            plt.text(
+                mid_point,
+                1.8,
+                "DEEPFAKE",
+                color="#c0392b",
+                fontsize=12,
+                fontweight="bold",
+                ha="center",
+                va="center",
+                bbox=dict(facecolor="white", alpha=0.8, boxstyle="round", pad=0.4, edgecolor="none"),
+            )
+
+        plt.title(f"Distance to Identity Centroid: {video['title']}")
+        plt.xlabel("Time (seconds)")
+        plt.ylabel("L2 Distance")
+        plt.grid(True, alpha=0.3)
+
+        # Use scientific style with no border on top and right
+        sns.despine()
+
+        # Save with publication quality
+        plt.tight_layout()
+        plt.savefig(
+            figures_dir / f"deepfake_detection_{video['name'].replace('.mp4', '')}.png",
+            bbox_inches='tight'
         )
         plt.close()
