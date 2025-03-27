@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,7 +22,9 @@ def signatures_distance(dataset: TMSDataset) -> None:
 
     Args:
         dataset: The dataset to analyze
+        models: List of models to use for the experiment
     """
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     processed_dataset = FacialFeaturesDataset(
@@ -139,7 +142,9 @@ def contrastive_learning_finetuning(dataset: TMSDataset) -> None:
 
     Args:
         dataset: The dataset to use for fine-tuning
+        models: List of models to use for the experiment
     """
+
     print(f"\nRunning contrastive learning fine-tuning for {dataset.name}...")
 
     # Create train dataset
@@ -372,7 +377,9 @@ def arcface_signatures_distance(dataset: TMSDataset) -> None:
 
     Args:
         dataset: The dataset to analyze
+        models: List of models to use for the experiment
     """
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Create test dataset

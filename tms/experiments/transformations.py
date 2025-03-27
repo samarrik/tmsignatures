@@ -11,8 +11,16 @@ from sklearn.preprocessing import StandardScaler
 
 from tms.data.datasets import FacialFeaturesDataset, TMSDataset
 from tms.experiments.models.nsvm import train_nsvm
-from tms.experiments.models.resnet import train_resnet
+from tms.experiments.models.resnet import train_arcface_resnet, train_resnet
 from tms.experiments.models.svm import train_svm
+
+
+MODEL_NAMES = {
+    "SVM": "Support Vector Machine",
+    "NSVM": "Multiclass Novelty SVM",
+    "ResNet50": "ResNet50",
+    "ArcFaceResNet50": "ArcFace ResNet50"
+}
 
 
 def visualize_and_save_results(
@@ -58,12 +66,12 @@ def visualize_and_save_results(
     x_values = sorted(results.keys())
 
     for x_val in x_values:
-        for model in model_names:
+        for model in MODEL_NAMES:
             if model in results[x_val]:
                 plot_data.append(
                     {
                         "Parameter": x_val,
-                        "Model": model_names[model],
+                        "Model": MODEL_NAMES[model],
                         "Accuracy": results[x_val][model]["test_accuracy"],
                     }
                 )
@@ -109,18 +117,18 @@ def visualize_and_save_results(
 
 
 def run_single_length(
-    args: Tuple[TMSDataset, float],
+    args: Tuple[TMSDataset, float, List[str]],
 ) -> Tuple[float, Dict[str, Dict[str, float]]]:
     """
     Run experiments for a single sequence length.
 
     Args:
-        args: Tuple containing (dataset, length_coefficient)
+        args: Tuple containing (dataset, length_coefficient, models)
 
     Returns:
         Tuple of (length_coefficient, results dictionary)
     """
-    dataset, length_coeff = args
+    dataset, length_coeff, models = args
     print(
         f"Training models for length_coeff={length_coeff} of the {dataset.name} dataset..."
     )
@@ -139,59 +147,102 @@ def run_single_length(
         columns=["compress", "rescale"]
     )
 
-    # Prepare SVM data
-    X_test = corr_test_filtered.drop("identity", axis=1)
-    y_test = corr_test_filtered["identity"]
-    X_train = corr_train_filtered.drop("identity", axis=1)
-    y_train = corr_train_filtered["identity"]
+    # Initialize results dictionary
+    results = {}
 
-    # Scale data
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
+    # Train SVM if requested
+    if "SVM" in models:
+        # Prepare SVM data
+        X_test = corr_test_filtered.drop("identity", axis=1)
+        y_test = corr_test_filtered["identity"]
+        X_train = corr_train_filtered.drop("identity", axis=1)
+        y_train = corr_train_filtered["identity"]
 
-    # Prepare ResNet data
-    train_dataset = FacialFeaturesDataset(
-        name=dataset.name,
-        root_path=dataset.path / "processed" / "Raw" / "None" / "train",
-        features=dataset.features,
-        clip_length=dataset.req_clip_length,
-        fps=dataset.req_fps,
-    )
-    test_dataset = FacialFeaturesDataset(
-        name=dataset.name,
-        root_path=dataset.path / "processed" / "Raw" / "None" / "test",
-        features=dataset.features,
-        clip_length=dataset.req_clip_length,
-        fps=dataset.req_fps,
-    )
+        # Scale data
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
+        
+        results["SVM"] = train_svm(X_train, y_train, X_test, y_test)
 
-    # Train models and return results
-    return length_coeff, {
-        "svm": train_svm(X_train, y_train, X_test, y_test),
-        "nsvm": train_nsvm(X_train, y_train, X_test, y_test),
-        "resnet": train_resnet(
+    # Train NSVM if requested
+    if "NSVM" in models:
+        if "SVM" not in models:  # Prepare data if not already done
+            X_test = corr_test_filtered.drop("identity", axis=1)
+            y_test = corr_test_filtered["identity"]
+            X_train = corr_train_filtered.drop("identity", axis=1)
+            y_train = corr_train_filtered["identity"]
+
+            scaler = StandardScaler()
+            X_train = scaler.fit_transform(X_train)
+            X_test = scaler.transform(X_test)
+            
+        results["NSVM"] = train_nsvm(X_train, y_train, X_test, y_test)
+
+    # Train ResNet if requested
+    if "ResNet50" in models:
+        # Prepare ResNet data
+        train_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Raw" / "None" / "train",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        test_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Raw" / "None" / "test",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        
+        results["ResNet50"] = train_resnet(
             train_dataset,
             test_dataset,
             save_best_model=True if length_coeff == 1.0 else False,
             num_workers=int(os.getenv("SLURM_CPUS_PER_TASK", 1)),
-        ),
-    }
+        )
+        
+    if "ArcFaceResNet50" in models:
+        # Prepare ResNet data
+        train_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Raw" / "None" / "train",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        test_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Raw" / "None" / "test",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        
+        results["ArcFaceResNet50"] = train_arcface_resnet(
+            train_dataset,
+            test_dataset,
+            save_best_model=True if length_coeff == 1.0 else False,
+            num_workers=int(os.getenv("SLURM_CPUS_PER_TASK", 1)),
+        )
+    return length_coeff, results
 
 
 def run_single_compression(
-    args: Tuple[TMSDataset, int],
+    args: Tuple[TMSDataset, int, List[str]],
 ) -> Tuple[int, Dict[str, Dict[str, float]]]:
     """
     Run experiments for a single compression value.
 
     Args:
-        args: Tuple containing (dataset, compression_value)
+        args: Tuple containing (dataset, compression_value, models)
 
     Returns:
         Tuple of (compression_value, results dictionary)
     """
-    dataset, compression_value = args
+    dataset, compression_value, models = args
     print(
         f"Training models for compression={compression_value} of the {dataset.name} dataset..."
     )
@@ -208,67 +259,100 @@ def run_single_compression(
         f"compress == {compression_value} & rescale == 0"
     ).drop(columns=["compress", "rescale"])
 
-    # Prepare SVM data
-    X_test = corr_test_filtered.drop("identity", axis=1)
-    y_test = corr_test_filtered["identity"]
-    X_train = corr_train_filtered.drop("identity", axis=1)
-    y_train = corr_train_filtered["identity"]
+    # Initialize results dictionary
+    results = {}
 
-    # Scale data
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
+    # Train SVM if requested
+    if "SVM" in models:
+        # Prepare SVM data
+        X_test = corr_test_filtered.drop("identity", axis=1)
+        y_test = corr_test_filtered["identity"]
+        X_train = corr_train_filtered.drop("identity", axis=1)
+        y_train = corr_train_filtered["identity"]
 
-    # Prepare ResNet data
-    train_dataset = FacialFeaturesDataset(
-        name=dataset.name,
-        root_path=dataset.path
-        / "processed"
-        / "Compress"
-        / str(compression_value)
-        / "train",
-        features=dataset.features,
-        clip_length=dataset.req_clip_length,
-        fps=dataset.req_fps,
-    )
-    test_dataset = FacialFeaturesDataset(
-        name=dataset.name,
-        root_path=dataset.path
-        / "processed"
-        / "Compress"
-        / str(compression_value)
-        / "test",
-        features=dataset.features,
-        clip_length=dataset.req_clip_length,
-        fps=dataset.req_fps,
-    )
+        # Scale data
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
+        
+        results["SVM"] = train_svm(X_train, y_train, X_test, y_test)
 
-    # Train models and return results
-    return compression_value, {
-        "svm": train_svm(X_train, y_train, X_test, y_test),
-        "nsvm": train_nsvm(X_train, y_train, X_test, y_test),
-        "resnet": train_resnet(
+    # Train NSVM if requested
+    if "NSVM" in models:
+        if "SVM" not in models:  # Prepare data if not already done
+            X_test = corr_test_filtered.drop("identity", axis=1)
+            y_test = corr_test_filtered["identity"]
+            X_train = corr_train_filtered.drop("identity", axis=1)
+            y_train = corr_train_filtered["identity"]
+
+            scaler = StandardScaler()
+            X_train = scaler.fit_transform(X_train)
+            X_test = scaler.transform(X_test)
+            
+        results["NSVM"] = train_nsvm(X_train, y_train, X_test, y_test)
+
+    # Train ResNet if requested
+    if "ResNet50" in models:
+        # Prepare ResNet data
+        train_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Compress" / str(compression_value) / "train",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        test_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Compress" / str(compression_value) / "test",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        
+        results["ResNet50"] = train_resnet(
+            train_dataset,
+            test_dataset,            
+            num_workers=int(os.getenv("SLURM_CPUS_PER_TASK", 1)),
+        )
+        
+    if "ArcFaceResNet50" in models:
+        # Prepare ResNet data
+        train_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Compress" / str(compression_value) / "train",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        test_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Compress" / str(compression_value) / "test",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        
+        results["ArcFaceResNet50"] = train_arcface_resnet(
             train_dataset,
             test_dataset,
-            save_best_model=True if compression_value == 1.0 else False,
             num_workers=int(os.getenv("SLURM_CPUS_PER_TASK", 1)),
-        ),
-    }
+        )
+    return compression_value, results
 
 
 def run_single_rescale(
-    args: Tuple[TMSDataset, float],
+    args: Tuple[TMSDataset, float, List[str]],
 ) -> Tuple[float, Dict[str, Dict[str, float]]]:
     """
     Run experiments for a single rescale value.
 
     Args:
-        args: Tuple containing (dataset, rescale_coefficient)
+        args: Tuple containing (dataset, rescale_coefficient, models)
 
     Returns:
         Tuple of (rescale_coefficient, results dictionary)
     """
-    dataset, rescale_coeff = args
+    dataset, rescale_coeff, models = args
     print(
         f"Training models for rescale={rescale_coeff} of the {dataset.name} dataset..."
     )
@@ -285,58 +369,100 @@ def run_single_rescale(
         f"compress == 0 & rescale == {rescale_coeff}"
     ).drop(columns=["compress", "rescale"])
 
-    # Prepare SVM data
-    X_test = corr_test_filtered.drop("identity", axis=1)
-    y_test = corr_test_filtered["identity"]
-    X_train = corr_train_filtered.drop("identity", axis=1)
-    y_train = corr_train_filtered["identity"]
+    # Initialize results dictionary
+    results = {}
 
-    # Scale data
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
+    # Train SVM if requested
+    if "SVM" in models:
+        # Prepare SVM data
+        X_test = corr_test_filtered.drop("identity", axis=1)
+        y_test = corr_test_filtered["identity"]
+        X_train = corr_train_filtered.drop("identity", axis=1)
+        y_train = corr_train_filtered["identity"]
 
-    # Prepare ResNet data
-    train_dataset = FacialFeaturesDataset(
-        name=dataset.name,
-        root_path=dataset.path / "processed" / "Rescale" / str(rescale_coeff) / "train",
-        features=dataset.features,
-        clip_length=dataset.req_clip_length,
-        fps=dataset.req_fps,
-    )
-    test_dataset = FacialFeaturesDataset(
-        name=dataset.name,
-        root_path=dataset.path / "processed" / "Rescale" / str(rescale_coeff) / "test",
-        features=dataset.features,
-        clip_length=dataset.req_clip_length,
-        fps=dataset.req_fps,
-    )
+        # Scale data
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
+        
+        results["SVM"] = train_svm(X_train, y_train, X_test, y_test)
 
-    # Train models and return results
-    return rescale_coeff, {
-        "svm": train_svm(X_train, y_train, X_test, y_test),
-        "nsvm": train_nsvm(X_train, y_train, X_test, y_test),
-        "resnet": train_resnet(
+    # Train NSVM if requested
+    if "NSVM" in models:
+        if "SVM" not in models:  # Prepare data if not already done
+            X_test = corr_test_filtered.drop("identity", axis=1)
+            y_test = corr_test_filtered["identity"]
+            X_train = corr_train_filtered.drop("identity", axis=1)
+            y_train = corr_train_filtered["identity"]
+
+            scaler = StandardScaler()
+            X_train = scaler.fit_transform(X_train)
+            X_test = scaler.transform(X_test)
+            
+        results["NSVM"] = train_nsvm(X_train, y_train, X_test, y_test)
+
+    # Train ResNet if requested
+    if "ResNet50" in models:
+        # Prepare ResNet data
+        train_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Rescale" / str(rescale_coeff) / "train",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        test_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Rescale" / str(rescale_coeff) / "test",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        
+        results["ResNet50"] = train_resnet(
+            train_dataset,
+            test_dataset,            
+            num_workers=int(os.getenv("SLURM_CPUS_PER_TASK", 1)),
+        )
+        
+    if "ArcFaceResNet50" in models:
+        # Prepare ResNet data
+        train_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Rescale" / str(rescale_coeff) / "train",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        test_dataset = FacialFeaturesDataset(
+            name=dataset.name,
+            root_path=dataset.path / "processed" / "Rescale" / str(rescale_coeff) / "test",
+            features=dataset.features,
+            clip_length=dataset.req_clip_length,
+            fps=dataset.req_fps,
+        )
+        
+        results["ArcFaceResNet50"] = train_arcface_resnet(
             train_dataset,
             test_dataset,
-            save_best_model=True if rescale_coeff == 1.0 else False,
             num_workers=int(os.getenv("SLURM_CPUS_PER_TASK", 1)),
-        ),
-    }
+        )
+    return rescale_coeff, results
 
 
-def sequence_length(dataset: TMSDataset, length_coeffs: List[float]) -> None:
+def sequence_length(dataset: TMSDataset, length_coeffs: List[float], models: List[str]) -> None:
     """
     Run experiments with different sequence lengths.
 
     Args:
         dataset: The dataset to use
         length_coeffs: List of length coefficients to test
+        models: List of models to use for the experiment
     """
     print(f"\nRunning sequence length experiment for {dataset.name}...")
 
     # Create argument list for parallel processing
-    args = [(dataset, coeff) for coeff in length_coeffs]
+    args = [(dataset, coeff, models) for coeff in length_coeffs]
 
     # Run experiments in parallel
     with ProcessPoolExecutor() as executor:
@@ -350,36 +476,39 @@ def sequence_length(dataset: TMSDataset, length_coeffs: List[float]) -> None:
         float(coeff) * (dataset.req_clip_length * dataset.req_fps): results[coeff]
         for coeff in results.keys()
     }
+    
+    # Filter model names to only include used models
+    model_names = {k: v for k, v in MODEL_NAMES.items() if k in models}
+
+    # Create experiment name with model indication
+    models_str = "_".join(models).lower()
 
     # Visualize and save results
     visualize_and_save_results(
         dataset=dataset,
         results=results,
-        name="sequence_length",
+        name=f"sequence_length_{models_str}",
         title="Effect of Sequence Length on Model Performance",
         x_label="Number of Frames",
         y_label="Test Accuracy (%)",
         legend_title="Models",
-        model_names={
-            "svm": "Support Vector Machine",
-            "nsvm": "Multiclass Novelty SVM",
-            "resnet": "ResNet50",
-        },
+        model_names=model_names,
     )
 
 
-def compression(dataset: TMSDataset, compression_values: List[int]) -> None:
+def compression(dataset: TMSDataset, compression_values: List[int], models: List[str]) -> None:
     """
     Run experiments with different compression values.
 
     Args:
         dataset: The dataset to use
         compression_values: List of compression values to test
+        models: List of models to use for the experiment
     """
     print(f"\nRunning compression experiment for {dataset.name}...")
 
     # Create argument list for parallel processing
-    args = [(dataset, value) for value in compression_values]
+    args = [(dataset, value, models) for value in compression_values]
 
     # Run experiments in parallel
     with ProcessPoolExecutor() as executor:
@@ -387,36 +516,39 @@ def compression(dataset: TMSDataset, compression_values: List[int]) -> None:
 
     # Convert results list to dictionary
     results = dict(results_list)
+    
+    # Filter model names to only include used models
+    model_names = {k: v for k, v in MODEL_NAMES.items() if k in models}
 
+    # Create experiment name with model indication
+    models_str = "_".join(models).lower()
+    
     # Visualize and save results
     visualize_and_save_results(
         dataset=dataset,
         results=results,
-        name="compression",
+        name=f"compression_{models_str}",
         title="Effect of Video Compression on Model Performance",
         x_label="CRF Value (lower = better quality)",
         y_label="Test Accuracy (%)",
         legend_title="Models",
-        model_names={
-            "svm": "Support Vector Machine",
-            "nsvm": "Multiclass Novelty SVM",
-            "resnet": "ResNet50",
-        },
+        model_names=model_names,
     )
 
 
-def rescale(dataset: TMSDataset, rescale_coeffs: List[float]) -> None:
+def rescale(dataset: TMSDataset, rescale_coeffs: List[float], models: List[str]) -> None:
     """
     Run experiments with different rescale coefficients.
 
     Args:
         dataset: The dataset to use
         rescale_coeffs: List of rescale coefficients to test
+        models: List of models to use for the experiment
     """
     print(f"\nRunning rescale experiment for {dataset.name}...")
 
     # Create argument list for parallel processing
-    args = [(dataset, coeff) for coeff in rescale_coeffs]
+    args = [(dataset, coeff, models) for coeff in rescale_coeffs]
 
     # Run experiments in parallel
     with ProcessPoolExecutor() as executor:
@@ -430,19 +562,21 @@ def rescale(dataset: TMSDataset, rescale_coeffs: List[float]) -> None:
         float(coeff) * dataset.req_resolution[0]: results[coeff]
         for coeff in results.keys()
     }
+    
+    # Filter model names to only include used models
+    model_names = {k: v for k, v in MODEL_NAMES.items() if k in models}
+    
+    # Create experiment name with model indication
+    models_str = "_".join(models).lower()
 
     # Visualize and save results
     visualize_and_save_results(
         dataset=dataset,
         results=results,
-        name="resolution",
+        name=f"resolution_{models_str}",
         title="Effect of Video Resolution on Model Performance",
         x_label="Width in Pixels",
         y_label="Test Accuracy (%)",
         legend_title="Models",
-        model_names={
-            "svm": "Support Vector Machine",
-            "nsvm": "Multiclass Novelty SVM",
-            "resnet": "ResNet50",
-        },
+        model_names=model_names,
     )

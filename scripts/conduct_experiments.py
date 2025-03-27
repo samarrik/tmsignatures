@@ -26,27 +26,43 @@ def main():
 
         # Sequence length experiment
         sequence_length(
-            dataset=dataset, length_coeffs=[0.01, 0.1, 0.25, 0.5, 0.75, 1.0]
+            dataset=dataset,
+            length_coeffs=[0.01, 0.1, 0.25, 0.5, 0.75, 1.0],
+            models=["SVM", "NSVM", "ResNet50"],
         )
 
         # Compression experiment
-        compression(dataset=dataset, compression_values=[28, 36, 41, 51])
+        compression(
+            dataset=dataset,
+            compression_values=[28, 36, 41, 51],
+            models=["SVM", "NSVM", "ResNet50"],
+        )
 
         # Rescale experiment
-        rescale(dataset=dataset, rescale_coeffs=[0.75, 0.5, 0.25, 0.1])
+        rescale(
+            dataset=dataset,
+            rescale_coeffs=[0.75, 0.5, 0.25, 0.1],
+            models=["SVM", "NSVM", "ResNet50"],
+        )
 
     # Run signature experiments for each dataset
     for name, dataset in datasets.items():
         print(f"\nRunning signature experiments for {name} dataset...")
 
         # Calculate distances to centroids
-        signatures_distance(dataset)
+        signatures_distance(
+            dataset=dataset,
+        )
 
         # Fine-tune with contrastive learning
-        contrastive_learning_finetuning(dataset)
+        contrastive_learning_finetuning(
+            dataset=dataset,
+        )
 
         # Calculate distances with ArcFace
-        arcface_signatures_distance(dataset)
+        arcface_signatures_distance(
+            dataset=dataset,
+        )
 
     # Run deepfake detection experiment
     if "TalkingCelebs" in datasets and "Additional" in datasets:
@@ -57,6 +73,32 @@ def main():
         )
     else:
         print("\nSkipping deepfake detection experiment - required datasets not found")
+
+    # ArcFace transformation experiments
+    print("\nRunning ArcFace transformation experiments...")
+    for name, dataset in datasets.items():
+        print(f"\nRunning ArcFace transformation experiments for {name} dataset...")
+
+        # ArcFace sequence length experiment
+        sequence_length(
+            dataset=dataset,
+            length_coeffs=[0.01, 0.1, 0.25, 0.5, 0.75, 1.0],
+            models=["ArcFaceResNet50"],
+        )
+
+        # ArcFace compression experiment
+        compression(
+            dataset=dataset,
+            compression_values=[28, 36, 41, 51],
+            models=["ArcFaceResNet50"],
+        )
+
+        # ArcFace rescale experiment
+        rescale(
+            dataset=dataset,
+            rescale_coeffs=[0.75, 0.5, 0.25, 0.1],
+            models=["ArcFaceResNet50"],
+        )
 
 
 if __name__ == "__main__":
